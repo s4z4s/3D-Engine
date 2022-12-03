@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html>
+
+<title>3D Engine</title>
+<canvas id="game" width="800" height="600"></canvas>
+<script src="script.js"></script>
+
+<canvas id="game" width="800" height="600"></canvas>
+
+<script>
+    var x = 400;
+    var y = 0;
+    var z = 300;
+    var fov = 120;
+    var vspd = 0;
+    var canJump = false;
+    var pWidth = 50;
+    var pHeight = 50;
+    var blink = 0;
+    var left = false;
+    var right = false;
+    var up = false;
+    var down = false;
+    var space = false;
+    var shift = false;
+    var canvas = document.getElementById("game");
+    var ctx = canvas.getContext("2d");
+    var xTurn = 0;
+    var yTurn = 0;
+    var fpang = 0;
+    var fpYang = 0;
+    var quadsToDraw = [];
+    var wall = [
+        [300, 300, 100, 100],
+        [600, 100, 50, 350],
+        [200, 500, 450, 50]
+    ];
+
+    window.onload = function () {
+        var fps = 60;
+        document.addEventListener("keydown", keydown);
+        document.addEventListener("keyup", keyup);
+        document.addEventListener("mousemove", mouseMoved);
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        setInterval(gameloop, 1000 / fps);
+    }
+
+    function gameloop() {
+        gameLogic();
+        paintScreen();
+    }
+
+    function minMax(val, min, max) {
+        return Math.min(Math.max(min, val), max);
+    }
+
+    function fpDrawPillar(prX, prY, prZ, prW, prH, prL) {
+        var propEnds = 0.03;
+        var propIn = 0.66;
+
+        var playerHeight = 100;
+        prY = playerHeight - prH - prY;
+
+        fillPrism(prX + prW * (1 - propIn) / 2, prY + prH * propEnds,
+            prZ + prL * (1 - propIn) / 2, prW * propIn, prH - prH * propEnds, prL * propIn);
+
+
+
+        var col = hexToRgb(ctx.fillStyle);
+
+        ctx.fillStyle = ctx.fillStyle = 'rgb(' + parseInt(col.r / 2) + ', ' +
+            parseInt(col.g / 2) + ', ' + parseInt(col.b / 2) + ')';
+        fillPrism(prX, prY, prZ, prW, prH * propEnds, prL);
+        fillPrism(prX, prY + prH - prH * propEnds, prZ, prW, prH * propEnds, prL);
+    }
+
+    function hexToRgb(hex) {
+        var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : null;
+    }
+
+    function fillPrism(prX, prY, prZ, prW, prH, prL) {
+        draw3dQuad(prX, prY, prZ, prX, prY, prZ + prL, prX + prW, prY, prZ + prL, prX + prW, prY, prZ);
+        draw3dQuad(prX, prY, prZ, prX, prY, prZ + prL, prX, prY + prH, prZ + prL, prX, prY + prH, prZ);
+        draw3dQuad(prX, prY, prZ, prX, prY + prH, prZ, prX + prW, prY + prH, prZ, prX + prW, prY, prZ);
+
+        draw3dQuad(prX + prW, prY + prH, prZ + prL, prX + prW, prY + prH, prZ,
+            prX + prW, prY, prZ, prX + prW, prY, prZ + prL);
+        draw3dQuad(prX + prW, prY + prH, prZ + prL, prX + prW, prY + prH, prZ,
+            prX, prY + prH, prZ, prX, prY + prH, prZ + prL);
+        draw3dQuad(prX + prW, prY + prH, prZ + prL, prX + prW, prY, prZ + prL,
+            prX, prY, prZ + prL, prX, prY + prH, prZ + prL);
+    }
+
+    function calcFov(deg) {
+        var ha = degToRad(deg / 2);
+        var hw = canvas.width / 2;
+
+        var sd = hw / Math.tan(ha);
+
+        return sd;
+    }
+
+    function degToRad(deg) {
+        return deg / 180 * Math.PI;
+    }
+
+    function get3dPoint(x1, y1, z1) {
+        var centerOfScreenX = canvas.width / 2;
+        var centerOfScreenY = canvas.height / 2;
+
+        var screenDistance = calcFov(fov);
+
+        var x1Diff = x1 - x;
+        var y1Diff = y1 - y;
+        var z1Diff = z1 - z;
+
+        var translatedX1 = x1Diff * Math.cos(-fpang) + z1Diff * Math.sin(-fpang);
+        var midTransZ = z1Diff * Math.cos(-fpang) - x1Diff * Math.sin(-fpang);
+
+        var translatedY1 = y1Diff * Math.cos(-fpYang) + midTransZ * Math.sin(-fpYang);
+        var translatedZ1 = midTransZ * Math.cos(-fpYang) - y1Diff * Math.sin(-fpYang);
+
+
+
+        var dispX1 = (translatedX1 / translatedZ1) * screenDistance;
+        var dispY1 = (translatedY1 / translatedZ1) * screenDistance;
+
+        if (translatedZ1 <= 0) {
+            dispX1 = dispX1 * -100;
+            dispY1 = dispY1 * -100;
+        }
+
+        dispX1 += centerOfScreenX;
+        dispY1 += centerOfScreenY;
+
+        return [dispX1, dispY1, translatedZ1];
+    }
+
+    function precisionRound(n, precision) {
+        return Math.round(n * precision) / precision;
+    }
+
+    function findQuadMidpoint(qd) {
+        var xtot = 0;
+        var ytot = 0;
+        var ztot = 0;
+        var qdl = qd.length;
+
+        for (var i = 0; i < qdl; i++) {
+            xtot += qd[i][0];
+            ytot += qd[i][1];
+            ztot += qd[i][2];
+        }
+        var xmid = xtot / qdl;
+        var ymid = ytot / qdl;
+        var zmid = ztot / qdl;
+
+        return [xmid, ymid, zmid];
+    }
+
+    function distBtwnPts(p1, p2) {
+        var sum = 0;
+        for (var i = 0; i < p1.length; i++) {
+            sum += Math.pow(p1[i] - p2[i], 2);
+        }
+        return Math.sqrt(sum);
+    }
+
+    function draw3dQuad(x1, y1, z1, x2, y2, z2, x3, y3, z3, x4, y4, z4) {
+        var qd = [];
+
+        qd[0] = get3dPoint(x1, y1, z1);
+        qd[1] = get3dPoint(x2, y2, z2);
+        qd[2] = get3dPoint(x3, y3, z3);
+        qd[3] = get3dPoint(x4, y4, z4);
+
+        var doDraw = false;
+
+        for (var i = 0; i < qd.length; i++) {
+
+            doDraw = doDraw || (qd[i][2] > 0);
+        }
+
+        if (doDraw) {
+
+
+            var playerPt = [x, y, z];
+            var quadPts = [[x1, y1, z1], [x2, y2, z2], [x3, y3, z3], [x4, y4, z4]];
+
+            var midpoint = findQuadMidpoint(quadPts);
+            var distToMid = distBtwnPts(playerPt, midpoint);
+
+
+
+            var distToMid = precisionRound(distToMid, 10000);
+
+            quadsToDraw.push([qd[0][0], qd[0][1], qd[1][0], qd[1][1], qd[2][0], qd[2][1], qd[3][0], qd[3][1], distToMid, ctx.fillStyle]);
+        }
+    }
+
+    function ctxDrawLine(x1, y1, x2, y2) {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+
+    function ctxDrawQuad(x1, y1, x2, y2, x3, y3, x4, y4) {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.lineTo(x3, y3);
+        ctx.lineTo(x4, y4);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    function ctxFillQuad(x1, y1, x2, y2, x3, y3, x4, y4) {
+        ctxFillTri(x1, y1, x2, y2, x3, y3);
+        ctxFillTri(x1, y1, x3, y3, x4, y4);
+    }
+
+    function ctxFillTri(x1, y1, x2, y2, x3, y3) {
+
+
+        var points = [[x1, y1], [x2, y2], [x3, y3]];
+        points = points.sort(function (a, b) {return a[1] - b[1];});
+
+        var slopes = [];
+
+        for (var i = 0; i < 3; i++) {
+            slopes[i] = (points[(i + 1) % 3][0] - points[i][0]) / (points[(i + 1) % 3][1] - points[i][1]);
+        }
+
+        var ysta = parseInt(Math.max(points[0][1], 0));
+        var yend = parseInt(Math.min(points[2][1], canvas.clientHeight));
+        var col = hexToRgb(ctx.fillStyle);
+
+        for (var i = ysta; i <= yend; i++) {
+            var px1;
+            var tval;
+            var tval2 = parseInt(i - points[0][1]);
+            if (i < points[1][1]) {
+                tval = parseInt(i - points[0][1]);
+                px1 = points[0][0] + tval * slopes[0];
+            }
+            else {
+                tval = parseInt(i - points[1][1]);
+                px1 = points[1][0] + tval * slopes[1];
+            }
+            var px2 = points[0][0] + tval2 * slopes[2];
+
+            var xsta = parseInt(Math.max(0, Math.min(px1, px2)));
+            var xend = parseInt(Math.min(canvas.clientWidth, Math.max(px1, px2)));
+
+            for (j = xsta; j <= xend; j++) {
+                setPixel(j, i, col.r, col.g, col.b, 255);
+            }
+        }
+    }
+
+    function controlLogic() {
+        var walkSpd = 3;
+        var turnMult = 3;
+
+        if (shift) {
+            walkSpd *= 2;
+        }
+
+        if (up) {
+            x += Math.sin(fpang) * walkSpd;
+            z += Math.cos(fpang) * walkSpd;
+        }
+        else if (down) {
+            x -= Math.sin(fpang) * walkSpd;
+            z -= Math.cos(fpang) * walkSpd;
+        }
+
+        if (right) {
+            x += Math.cos(fpang) * walkSpd;
+            z -= Math.sin(fpang) * walkSpd;
+        }
+        else if (left) {
+            x -= Math.cos(fpang) * walkSpd;
+            z += Math.sin(fpang) * walkSpd;
+        }
+
+        fpang += xTurn * turnMult;
+        fpYang += yTurn * turnMult;
+
+        xTurn = 0;
+        yTurn = 0;
+    }
+
+    function gameLogic() {
+        controlLogic();
+    }
+
+    function paintScreen() {
+        quadsToDraw = [];
+
+        ctx.fillStyle = "#696";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#000";
+
+        for (var i = 2; i < 3; i++) {
+            ctx.fillStyle = 'rgb(' + i * 31 + ', ' + ((i + 2) % 8) * 31 + ', ' + ((i + 5) % 8) * 31 + ')';
+            fpDrawPillar(550, 0, 200 + 400 * i, 50, 300, 50);
+            fpDrawPillar(200, 0, 200 + 400 * i, 50, 300, 50);
+
+
+
+            ctx.fillStyle = 'rgb(' + i * 31 + ', ' + ((i + 2) % 8) * 31 + ', ' + ((i + 5) % 8) * 31 + ')';
+
+        }
+
+        imageData = ctx.createImageData(canvas.clientWidth, canvas.clientHeight);
+
+        renderQuads();
+
+        ctx.putImageData(imageData, 0, 0);
+
+    }
+
+    function setPixel(x, y, r, g, b, a) {
+        var index = (x + y * imageData.width);
+        imageData.data[index * 4 + 0] = r;
+        imageData.data[index * 4 + 1] = g;
+        imageData.data[index * 4 + 2] = b;
+        imageData.data[index * 4 + 3] = a;
+    }
+
+    function renderQuads() {
+        quadsToDraw.sort(function (a, b) {return b[8] - a[8]});
+
+        for (var i = 0; i < quadsToDraw.length; i++) {
+            ctx.fillStyle = quadsToDraw[i][9];
+            ctxFillQuad(quadsToDraw[i][0], quadsToDraw[i][1], quadsToDraw[i][2], quadsToDraw[i][3],
+                quadsToDraw[i][4], quadsToDraw[i][5], quadsToDraw[i][6], quadsToDraw[i][7]);
+        }
+    }
+
+    function mouseMoved(evt) {
+        var mx = evt.movementX;
+        var my = evt.movementY;
+
+        if (document.pointerLockElement === canvas) {
+            xTurn = mx / canvas.width;
+        }
+
+        if (document.pointerLockElement === canvas) {
+            yTurn = my / canvas.height;
+        }
+    }
+
+    canvas.onclick = function () {
+        canvas.requestPointerLock();
+    }
+
+    function keydown(evt) {
+
+        switch (evt.keyCode) {
+            case 65:
+            case 37: left = true; break;
+            case 87:
+            case 38: up = true; break;
+            case 68:
+            case 39: right = true; break;
+            case 83:
+            case 40: down = true; break;
+            case 16: shift = true; break;
+        }
+    }
+
+    function keyup(evt) {
+        switch (evt.keyCode) {
+            case 65:
+            case 37: left = false; break;
+            case 87:
+            case 38: up = false; break;
+            case 68:
+            case 39: right = false; break;
+            case 83:
+            case 40: down = false; break;
+            case 16: shift = false; break;
+        }
+    }
+
+</script>
